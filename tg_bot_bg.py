@@ -191,16 +191,58 @@ def handle_message(token, msg, opener):
     agent_replied = False
     
     if CLOUD and is_creator:
-        AGENT_CMDS = [
-            "видюх", "видеокарт", "gpu", "график", "делаешь", "окно", "активн", "смотр",
-            "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
-            "памят", "комп", "пк", "систем", "аптайм", "работает", "включ",
-            "скачай", "скачать", "download", "удали", "удалить", "delete",
-            "запусти", "запустить", "start", "execute", "напиши", "запиши", "write", "save",
-            "установи", "install", "открой", "открыть", "open", "закрой", "close",
-            "выключи", "перезагрузи", "shutdown", "restart", "создай", "создать", "create",
-        ]
-        if any(kw in tlow for kw in AGENT_CMDS):
+        # Определяем структурированную команду для агента
+        agent_task = {"query": tlow, "uid": uid, "is_creator": is_creator}
+        ai_action = None
+        SIMPLE_CMDS = ["видюх", "видеокарт", "gpu", "график", "делаешь", "окно", "активн", "смотр",
+                       "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
+                       "памят", "комп", "пк", "систем", "аптайм", "работает", "включ",
+                       "скачай", "скачать", "download", "удали", "удалить", "delete",
+                       "запусти", "запустить", "start", "execute", "напиши", "запиши", "write", "save",
+                       "установи", "install", "открой", "открыть", "open", "закрой", "close",
+                       "выключи", "перезагрузи", "shutdown", "restart", "создай", "создать", "create"]
+        if any(kw in tlow for kw in SIMPLE_CMDS):
+            ai_action = "raw"
+        else:
+            ai_check = get_response(
+                "Ты J.A.R.V.I.S. Определи тип запроса. Ответь ТОЛЬКО одной фразой из списка:\n"
+                "- app НАЗВАНИЕ_ПРОГРАММЫ (открыть/запустить)\n"
+                "- ps POWERSHELL_КОМАНДА (выполнить команду)\n"
+                "- close ИМЯ_ПРОГРАММЫ (закрыть)\n"
+                "- url АДРЕС (открыть сайт)\n"
+                "- search ЗАПРОС (найти в интернете)\n"
+                "- skip (обычный разговор)",
+                text
+            )
+            if ai_check:
+                ai_check = ai_check.strip()[:200]
+                log("  -> AI classify: %s" % ai_check)
+                ai_action = ai_check
+
+        if ai_action and ai_action != "skip":
+            # Преобразуем AI-ответ в структурированную задачу
+            if ai_action == "raw":
+                pass  # query уже есть
+            elif ai_action.startswith("app "):
+                agent_task["action"] = "open"
+                agent_task["params"] = {"app": ai_action[4:].strip()}
+            elif ai_action.startswith("ps "):
+                agent_task["action"] = "ps"
+                agent_task["params"] = {"cmd": ai_action[3:].strip()}
+            elif ai_action.startswith("close "):
+                agent_task["action"] = "close"
+                agent_task["params"] = {"app": ai_action[6:].strip()}
+            elif ai_action.startswith("url "):
+                agent_task["action"] = "url"
+                agent_task["params"] = {"url": ai_action[4:].strip()}
+            elif ai_action.startswith("search "):
+                agent_task["action"] = "search"
+                agent_task["params"] = {"q": ai_action[7:].strip()}
+
+            with _task_lock:
+                _pending_task.update(agent_task)
+                _pending_task["result"] = None
+                _pending_task["time"] = time.time()
             with _task_lock:
                 _pending_task["query"] = tlow
                 _pending_task["result"] = None
@@ -213,7 +255,6 @@ def handle_message(token, msg, opener):
             try:
                 opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=wait_msg, timeout=10)
             except: pass
-            # Фоновый поток ждёт результат — не блокируем main
             def agent_waiter(cid, mid, token, tlow):
                 waited = 0
                 my_opener = get_opener()
@@ -227,11 +268,11 @@ def handle_message(token, msg, opener):
                             _pending_task["query"] = ""
                             _pending_task["result"] = None
                         if r.get("status") == "executed":
-                            reply = "J.A.R.V.I.S. выполнил: %s" % r.get("result", "")
+                            reply = r.get("result", "Готово.")
                             d = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
                             try: my_opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=d, timeout=10)
                             except: pass
-                            log("  -> agent executed: %s" % r.get("result","")[:40])
+                            log("  -> agent executed: %s" % str(r.get("result",""))[:40])
                         elif r.get("status") == "denied":
                             reply = "J.A.R.V.I.S.: %s" % r.get("result", "Невозможно выполнить")
                             d = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
@@ -254,7 +295,7 @@ def handle_message(token, msg, opener):
                         my_opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=timeout_msg, timeout=10)
                     except: pass
             threading.Thread(target=agent_waiter, args=(cid, mid, token, tlow), daemon=True).start()
-            return  # Не ждём, main свободен
+            return
     
     # Локальный режим: действия и sysinfo
     if not CLOUD:
@@ -361,10 +402,12 @@ def http_agent():
                     self.wfile.write(b"OK")
                 elif self.path == "/agent/task":
                     with _task_lock:
-                        if _pending_task["query"] and _pending_task["result"] is None:
+                        if _pending_task.get("query") and _pending_task["result"] is None:
                             task = {"query": _pending_task["query"],
                                     "uid": _pending_task.get("uid", 0),
-                                    "is_creator": _pending_task.get("is_creator", False)}
+                                    "is_creator": _pending_task.get("is_creator", False),
+                                    "action": _pending_task.get("action", ""),
+                                    "params": _pending_task.get("params", {})}
                             log("Agent task served: %s" % _pending_task["query"][:40])
                         else:
                             task = {}
