@@ -185,123 +185,31 @@ def handle_message(token, msg, opener):
     if ctype != "private" and "джарвис" not in tlow and "@jarvis67zebrabot" not in tlow:
         return
     
-    # Действия от имени J.A.R.V.I.S.
+    # Облачный режим: все запросы к ПК через PC-агента
     action_result = None
-    if jarvis_actions.has_action_intent(tlow):
-        req_name = msg.get("from", {}).get("first_name", "Пользователь")
-        act = jarvis_actions.execute_intent(text, uid, is_creator, req_name)
-        
-        if act["status"] == "confirmation_required":
-            data = urllib.parse.urlencode({"chat_id": cid, "text": act["message"], "reply_to_message_id": mid}).encode()
-            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
-            log("  -> confirmation asked: %s" % (act.get("command","")[:40]))
-            return
-        
-        elif act["status"] == "requires_owner":
-            data = urllib.parse.urlencode({"chat_id": cid, "text": act["message"], "reply_to_message_id": mid}).encode()
-            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
-            owner_msg = "🔐 %s" % act["message"]
-            data2 = urllib.parse.urlencode({"chat_id": 1270368868, "text": owner_msg}).encode()
-            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
-            log("  -> owner asked")
-            return
-        
-        elif act["status"] == "denied":
-            data = urllib.parse.urlencode({"chat_id": cid, "text": act["message"], "reply_to_message_id": mid}).encode()
-            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
-            log("  -> action denied")
-            return
-        elif act["status"] == "executed":
-            action_result = act["message"][:200]
-            log("  -> executed: %s" % (act.get("command","")[:40]))
-        elif act["status"] == "unrecognized":
-            # Спрашиваем AI — пользователь хочет открыть приложение или что-то другое?
-            ai_prompt = ("Ты J.A.R.V.I.S. Пользователь пишет: '%s'. "
-                         "Что ему нужно? Ответь ОДНИМ словом: "
-                         "'app НАЗВАНИЕ_ПРИЛОЖЕНИЯ' если хочет открыть программу, "
-                         "'url АДРЕС' если хочет открыть сайт/ссылку, "
-                         "'search ЗАПРОС' если хочет найти что-то, "
-                         "или 'skip ОТВЕТ' если не можешь выполнить." % text)
-            ai_resp = get_response(ai_prompt, text)
-            if ai_resp:
-                ai_resp = ai_resp.strip()[:100]
-                if ai_resp.startswith("app "):
-                    app_name = ai_resp[4:].strip()
-                    cmd = jarvis_actions.find_app_ps(app_name)
-                    level = jarvis_actions.classify_action(cmd)
-                    if level == jarvis_actions.DANGEROUS:
-                        reply = "J.A.R.V.I.S.: Не могу — это опасно."
-                    elif level == jarvis_actions.SUSPICIOUS:
-                        cid2 = "%s_ai_%d" % (uid, int(time.time()))
-                        jarvis_actions.pending_confirmations[cid2] = {"script": cmd, "time": time.time(), "user_id": uid, "owner_required": False}
-                        reply = "J.A.R.V.I.S. — AI предлагает:\n%s\n\nПодтвердите: да / нет" % cmd
-                    else:
-                        result = jarvis_actions.run_ps(cmd)
-                        reply = "J.A.R.V.I.S. выполнил:\n%s" % result
-                elif ai_resp.startswith("url "):
-                    url = ai_resp[4:].strip()
-                    cmd = jarvis_actions.launch_url(url)
-                    result = jarvis_actions.run_ps(cmd)
-                    reply = "J.A.R.V.I.S. открыл:\n%s" % result
-                elif ai_resp.startswith("search "):
-                    q = ai_resp[7:].strip()
-                    cmd = jarvis_actions.search_web(q)
-                    result = jarvis_actions.run_ps(cmd)
-                    reply = "J.A.R.V.I.S. ищет:\n%s" % result
-                else:
-                    # skip — AI сам ответит
-                    log("  -> AI skip: %s" % ai_resp)
-                    ai_prompt2 = "Ты J.A.R.V.I.S. Ответь на запрос пользователя одним-двумя предложениями."
-                    reply = get_response(ai_prompt2 + " Запрос: " + text, text)
-                    if reply:
-                        data = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
-                        opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
-                        log("  -> AI replied: %s" % reply[:50])
-                    return
-                data = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
-                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
-                log("  -> AI cmd: %s" % reply[:40])
-                return
-            log("  -> AI failed, falling through")
-    
-    # Обработка подтверждений (для владельца)
-    confirm_reply = None
-    if is_creator:
-        confirm_reply, notify_req = jarvis_actions.handle_confirmation(text, uid)
-        if notify_req:
-            try:
-                req_id, req_msg = notify_req
-                nd = urllib.parse.urlencode({"chat_id": req_id, "text": req_msg}).encode()
-                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=nd, timeout=10)
-            except:
-                pass
-        if confirm_reply:
-            data = urllib.parse.urlencode({"chat_id": cid, "text": confirm_reply, "reply_to_message_id": mid}).encode()
-            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
-            log("  -> confirmation processed")
-            return
-    
-    # Системная информация (только для Ильи) — собираем данные и отдаём ИИ на обработку
-    SYS_CMDS = ["видюх", "видеокарт", "gpu", "график", "делаешь", "окно", "активн", "смотр",
-                "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
-                "памят", "комп", "пк", "систем", "аптайм", "работает", "включ"]
     sysinfo_data = None
-    if is_creator and any(w in tlow for w in SYS_CMDS):
-        if jarvis_sysinfo:
-            try:
-                sysinfo_data = jarvis_sysinfo.format_sys_info(tlow)
-            except Exception as e:
-                log("Sysinfo error: %s" % str(e)[:60])
-        elif CLOUD:
-            # Спрашиваем PC-агента
+    agent_replied = False
+    
+    if CLOUD and is_creator:
+        AGENT_CMDS = [
+            "видюх", "видеокарт", "gpu", "график", "делаешь", "окно", "активн", "смотр",
+            "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
+            "памят", "комп", "пк", "систем", "аптайм", "работает", "включ",
+            "скачай", "скачать", "download", "удали", "удалить", "delete",
+            "запусти", "запустить", "start", "execute", "напиши", "запиши", "write", "save",
+            "установи", "install", "открой", "открыть", "open", "закрой", "close",
+            "выключи", "перезагрузи", "shutdown", "restart", "создай", "создать", "create",
+        ]
+        if any(kw in tlow for kw in AGENT_CMDS):
             with _task_lock:
                 _pending_task["query"] = tlow
                 _pending_task["result"] = None
                 _pending_task["chat_id"] = cid
                 _pending_task["msg_id"] = mid
                 _pending_task["time"] = time.time()
-            # Шлём "проверяю" и ждём 10 секунд
-            wait_msg = urllib.parse.urlencode({"chat_id": cid, "text": "Проверяю ваш ПК, сэр...", "reply_to_message_id": mid}).encode()
+                _pending_task["uid"] = uid
+                _pending_task["is_creator"] = is_creator
+            wait_msg = urllib.parse.urlencode({"chat_id": cid, "text": "Выполняю, сэр...", "reply_to_message_id": mid}).encode()
             try:
                 opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=wait_msg, timeout=10)
             except: pass
@@ -310,9 +218,78 @@ def handle_message(token, msg, opener):
                 time.sleep(3)
                 waited += 3
                 with _task_lock:
-                    if _pending_task["result"] is not None:
-                        sysinfo_data = _pending_task["result"]
+                    r = _pending_task.get("result")
+                    if r is not None:
+                        agent_replied = True
+                        if r.get("status") == "executed":
+                            reply = "J.A.R.V.I.S. выполнил: %s" % r.get("result", "")
+                            data2 = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
+                            try:
+                                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
+                            except: pass
+                            log("  -> agent executed: %s" % r.get("result","")[:40])
+                            return
+                        elif r.get("status") == "denied":
+                            reply = "J.A.R.V.I.S.: %s" % r.get("result", "Невозможно выполнить")
+                            data2 = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
+                            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
+                            log("  -> agent denied")
+                            return
+                        elif r.get("status") == "sysinfo":
+                            sysinfo_data = r.get("result", "")
+                            log("  -> agent sysinfo: %s" % sysinfo_data[:40])
                         break
+            if not agent_replied:
+                # Убираем cloud_note — AI сам объяснит
+                pass
+    
+    # Локальный режим: действия и sysinfo
+    if not CLOUD:
+        if jarvis_actions.has_action_intent(tlow):
+            req_name = msg.get("from", {}).get("first_name", "Пользователь")
+            act = jarvis_actions.execute_intent(text, uid, is_creator, req_name)
+            if act["status"] == "executed":
+                action_result = act["message"][:200]
+                log("  -> executed: %s" % (act.get("command","")[:40]))
+            elif act["status"] == "unrecognized":
+                action_result = None
+            elif act["status"] == "denied":
+                data = urllib.parse.urlencode({"chat_id": cid, "text": act["message"], "reply_to_message_id": mid}).encode()
+                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
+                log("  -> action denied")
+                return
+            else:
+                # confirmation_required, requires_owner
+                msg_text = act.get("message", "")
+                data = urllib.parse.urlencode({"chat_id": cid, "text": msg_text, "reply_to_message_id": mid}).encode()
+                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
+                if act["status"] == "requires_owner":
+                    owner_msg = "%s" % msg_text
+                    data2 = urllib.parse.urlencode({"chat_id": 1270368868, "text": owner_msg}).encode()
+                    opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
+                log("  -> %s" % act["status"])
+                return
+        if is_creator:
+            confirm_reply, notify_req = jarvis_actions.handle_confirmation(text, uid)
+            if notify_req:
+                try:
+                    req_id, req_msg = notify_req
+                    nd = urllib.parse.urlencode({"chat_id": req_id, "text": req_msg}).encode()
+                    opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=nd, timeout=10)
+                except: pass
+            if confirm_reply:
+                data = urllib.parse.urlencode({"chat_id": cid, "text": confirm_reply, "reply_to_message_id": mid}).encode()
+                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data, timeout=10)
+                log("  -> confirmation processed")
+                return
+        SYS_CMDS = ["видюх", "видеокарт", "gpu", "график", "делаешь", "окно", "активн", "смотр",
+                    "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
+                    "памят", "комп", "пк", "систем", "аптайм", "работает", "включ"]
+        if is_creator and jarvis_sysinfo and any(w in tlow for w in SYS_CMDS):
+            try:
+                sysinfo_data = jarvis_sysinfo.format_sys_info(tlow)
+            except Exception as e:
+                log("Sysinfo error: %s" % str(e)[:60])
     
     # Если не создатель и есть мат/оскорбления — жёсткий ответ без модели
     INSULTS = ["хуй", "пизда", "бля", "нахуй", "ёб", "заткнись", "ты тупой", "лох", "дебил", "иди на", "пошёл"]
@@ -337,8 +314,8 @@ def handle_message(token, msg, opener):
         else:
             text_with_info = text
         cloud_note = ""
-        if CLOUD and not sysinfo_data:
-            cloud_note = "Ты запущен на облачном сервере (Render) и не имеешь доступа к ПК создателя. ПК создателя сейчас не в сети или не отвечает. Объясни это вежливо."
+        if CLOUD and not sysinfo_data and not action_result:
+            cloud_note = "Ты запущен на облачном сервере (Render). ПК создателя сейчас не в сети. Объясни это вежливо."
         if is_creator:
             prompt = ("Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. "
                       "Обращайся 'сэр'. Терпишь оскорбления от создателя. Если оскорбляет другой — пошли нахер. " + cloud_note).strip()
@@ -352,7 +329,7 @@ def handle_message(token, msg, opener):
         log("  -> %s" % response[:50])
 
 # Очередь задач для PC-агента
-_pending_task = {"query": "", "result": None, "chat_id": 0, "msg_id": 0, "time": 0}
+_pending_task = {"query": "", "result": None, "chat_id": 0, "msg_id": 0, "time": 0, "uid": 0, "is_creator": False}
 _task_lock = threading.Lock() if CLOUD else None
 
 def http_agent():
@@ -372,7 +349,9 @@ def http_agent():
                 elif self.path == "/agent/task":
                     with _task_lock:
                         if _pending_task["query"] and _pending_task["result"] is None:
-                            task = {"query": _pending_task["query"]}
+                            task = {"query": _pending_task["query"],
+                                    "uid": _pending_task.get("uid", 0),
+                                    "is_creator": _pending_task.get("is_creator", False)}
                             log("Agent task served: %s" % _pending_task["query"][:40])
                         else:
                             task = {}
@@ -391,8 +370,8 @@ def http_agent():
                         data = json.loads(body)
                         with _task_lock:
                             if data.get("query") == _pending_task["query"]:
-                                _pending_task["result"] = data.get("result", "")
-                                log("Agent result received: %s" % data.get("result","")[:40])
+                                _pending_task["result"] = data
+                                log("Agent result: status=%s msg=%s" % (data.get("status","?"), str(data.get("result",""))[:40]))
                     except: pass
                     self.send_response(200)
                     self.end_headers()
