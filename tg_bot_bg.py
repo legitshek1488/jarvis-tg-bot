@@ -1,4 +1,4 @@
-import sys, json, time, urllib.request, urllib.parse, random, os
+import sys, json, time, urllib.request, urllib.parse, random, os, threading
 from pathlib import Path
 
 DIR = Path(__file__).parent
@@ -286,11 +286,33 @@ def handle_message(token, msg, opener):
                 "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
                 "памят", "комп", "пк", "систем", "аптайм", "работает", "включ"]
     sysinfo_data = None
-    if is_creator and any(w in tlow for w in SYS_CMDS) and jarvis_sysinfo:
-        try:
-            sysinfo_data = jarvis_sysinfo.format_sys_info(tlow)
-        except Exception as e:
-            log("Sysinfo error: %s" % str(e)[:60])
+    if is_creator and any(w in tlow for w in SYS_CMDS):
+        if jarvis_sysinfo:
+            try:
+                sysinfo_data = jarvis_sysinfo.format_sys_info(tlow)
+            except Exception as e:
+                log("Sysinfo error: %s" % str(e)[:60])
+        elif CLOUD:
+            # Спрашиваем PC-агента
+            with _task_lock:
+                _pending_task["query"] = tlow
+                _pending_task["result"] = None
+                _pending_task["chat_id"] = cid
+                _pending_task["msg_id"] = mid
+                _pending_task["time"] = time.time()
+            # Шлём "проверяю" и ждём 10 секунд
+            wait_msg = urllib.parse.urlencode({"chat_id": cid, "text": "Проверяю ваш ПК, сэр...", "reply_to_message_id": mid}).encode()
+            try:
+                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=wait_msg, timeout=10)
+            except: pass
+            waited = 0
+            while waited < 12:
+                time.sleep(1)
+                waited += 1
+                with _task_lock:
+                    if _pending_task["result"] is not None:
+                        sysinfo_data = _pending_task["result"]
+                        break
     
     # Если не создатель и есть мат/оскорбления — жёсткий ответ без модели
     INSULTS = ["хуй", "пизда", "бля", "нахуй", "ёб", "заткнись", "ты тупой", "лох", "дебил", "иди на", "пошёл"]
@@ -327,33 +349,70 @@ def handle_message(token, msg, opener):
         opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
         log("  -> %s" % response[:50])
 
-def http_health():
-    """Простой HTTP-сервер для health-check (Render/Fly.io)."""
+# Очередь задач для PC-агента
+_pending_task = {"query": "", "result": None, "chat_id": 0, "msg_id": 0, "time": 0}
+_task_lock = threading.Lock() if CLOUD else None
+
+def http_agent():
+    """HTTP-сервер: health-check + endpoint для PC-агента."""
     port = int(os.environ.get("PORT", 8080))
     try:
-        import socket
-        s = socket.socket()
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("0.0.0.0", port))
-        s.listen(1)
-        s.settimeout(1)
-        log("Health server on :%d" % port)
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import json
+        
+        class Handler(BaseHTTPRequestHandler):
+            def log_request(self, code=None, size=None): pass
+            def do_GET(self):
+                if self.path == "/healthz" or self.path == "/":
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"OK")
+                elif self.path == "/agent/task":
+                    with _task_lock:
+                        if _pending_task["query"] and _pending_task["result"] is None:
+                            task = {"query": _pending_task["query"]}
+                        else:
+                            task = {}
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(task).encode())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            def do_POST(self):
+                if self.path == "/agent/result":
+                    length = int(self.headers.get("Content-Length", 0))
+                    body = self.rfile.read(length).decode()
+                    try:
+                        data = json.loads(body)
+                        with _task_lock:
+                            if data.get("query") == _pending_task["query"]:
+                                _pending_task["result"] = data.get("result", "")
+                    except: pass
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b"OK")
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+        
+        server = HTTPServer(("0.0.0.0", port), Handler)
+        server.timeout = 1
+        log("Agent HTTP server on :%d" % port)
         while True:
             try:
-                conn, _ = s.accept()
-                conn.sendall(b"HTTP/1.1 200 OK\r\n\r\nOK")
-                conn.close()
-            except socket.timeout:
-                continue
-    except:
-        pass
+                server.handle_request()
+            except:
+                pass
+    except Exception as e:
+        log("Agent server error: %s" % str(e)[:60])
 
 def main():
     log("TG Bot BG started (%s)" % ("cloud" if CLOUD else "local"))
     if CLOUD:
         import threading
-        threading.Thread(target=http_health, daemon=True).start()
-        log("Health server on :8080")
+        threading.Thread(target=http_agent, daemon=True).start()
     warmup_local()
     last_id = 0
     while True:
