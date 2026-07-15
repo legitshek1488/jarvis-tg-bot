@@ -383,7 +383,7 @@ def handle_message(token, msg, opener):
         log("  -> %s" % response[:50])
 
 # Очередь задач для PC-агента
-_pending_task = {"query": "", "result": None, "chat_id": 0, "msg_id": 0, "time": 0, "uid": 0, "is_creator": False}
+_pending_task = {"query": "", "result": None, "chat_id": 0, "msg_id": 0, "time": 0, "uid": 0, "is_creator": False, "action": "", "params": {}}
 _task_lock = threading.Lock() if CLOUD else None
 
 def http_agent():
