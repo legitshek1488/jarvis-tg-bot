@@ -221,6 +221,9 @@ def handle_message(token, msg, opener):
                     r = _pending_task.get("result")
                     if r is not None:
                         agent_replied = True
+                        with _task_lock:
+                            _pending_task["query"] = ""
+                            _pending_task["result"] = None
                         if r.get("status") == "executed":
                             reply = "J.A.R.V.I.S. выполнил: %s" % r.get("result", "")
                             data2 = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
@@ -240,8 +243,9 @@ def handle_message(token, msg, opener):
                             log("  -> agent sysinfo: %s" % sysinfo_data[:40])
                         break
             if not agent_replied:
-                # Убираем cloud_note — AI сам объяснит
-                pass
+                with _task_lock:
+                    _pending_task["query"] = ""
+                    _pending_task["result"] = None
     
     # Локальный режим: действия и sysinfo
     if not CLOUD:
