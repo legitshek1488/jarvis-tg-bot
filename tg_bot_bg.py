@@ -214,9 +214,9 @@ def handle_message(token, msg, opener):
                 opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=wait_msg, timeout=10)
             except: pass
             waited = 0
-            while waited < 90:
-                time.sleep(3)
-                waited += 3
+            while waited < 20:
+                time.sleep(2)
+                waited += 2
                 with _task_lock:
                     r = _pending_task.get("result")
                     if r is not None:
