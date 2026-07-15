@@ -29,7 +29,15 @@ def log(msg):
     print(msg)
 
 def load_cfg():
-    return json.loads(CONFIG.read_text(encoding="utf-8")) if CONFIG.exists() else {}
+    cfg = {}
+    if CONFIG.exists():
+        cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
+    # Переменные окружения переопределяют config.json
+    if os.environ.get("BOT_TOKEN"):
+        cfg["token"] = os.environ["BOT_TOKEN"]
+    if os.environ.get("OPENROUTER_KEY"):
+        cfg["openrouter_key"] = os.environ["OPENROUTER_KEY"]
+    return cfg
 
 def get_opener():
     if PROXY:
@@ -293,14 +301,16 @@ def handle_message(token, msg, opener):
         log("  -> %s" % response[:50])
 
 def http_health():
-    """Простой HTTP-сервер для health-check (нужен Fly.io)."""
+    """Простой HTTP-сервер для health-check (Render/Fly.io)."""
+    port = int(os.environ.get("PORT", 8080))
     try:
         import socket
         s = socket.socket()
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("0.0.0.0", 8080))
+        s.bind(("0.0.0.0", port))
         s.listen(1)
         s.settimeout(1)
+        log("Health server on :%d" % port)
         while True:
             try:
                 conn, _ = s.accept()
