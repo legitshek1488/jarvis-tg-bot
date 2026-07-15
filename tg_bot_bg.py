@@ -314,10 +314,13 @@ def handle_message(token, msg, opener):
             text_with_info = "[%s] Вопрос пользователя: %s" % (" | ".join(context_parts), text)
         else:
             text_with_info = text
+        cloud_note = "Ты запущен на облачном сервере (Render) и не имеешь доступа к ПК создателя. Если спрашивают про ПК, видюху, окна, доту — объясни что он сейчас не подключён." if CLOUD else ""
         if is_creator:
-            prompt = "Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. Обращайся 'сэр'. Терпишь оскорбления от создателя. Если оскорбляет другой — пошли нахер."
+            prompt = ("Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. "
+                      "Обращайся 'сэр'. Терпишь оскорбления от создателя. Если оскорбляет другой — пошли нахер. " + cloud_note).strip()
         else:
-            prompt = "Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. Нейтрально, без 'сэр'. Если оскорбляют — пошли нахер."
+            prompt = ("Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. "
+                      "Нейтрально, без 'сэр'. Если оскорбляют — пошли нахер. " + cloud_note).strip()
         response = get_response(prompt, text_with_info)
     if response:
         data2 = urllib.parse.urlencode({"chat_id": cid, "text": response, "reply_to_message_id": mid}).encode()
