@@ -1,0 +1,25 @@
+Деплой J.A.R.V.I.S. Telegram Bot на Fly.io
+============================================
+
+1. Установите Flyctl:
+   powershell -Command "iwr https://fly.io/install.ps1 -UseBasicParsing | iex"
+
+2. Зайдите в аккаунт (можно через GitHub):
+   fly auth login
+
+3. Создайте приложение (один раз):
+   fly launch --no-deploy
+
+4. Задеплойте:
+   fly deploy
+
+5. Проверьте логи:
+   fly logs
+
+После деплоя бот работает 24/7 независимо от вашего ПК.
+
+Файлы:
+  tg_bot_bg.py      — сам бот (адаптирован для облака)
+  tg_bot_config.json — токен и ключи
+  Dockerfile        — образ для Fly.io
+  fly.toml          — конфиг Fly.io
