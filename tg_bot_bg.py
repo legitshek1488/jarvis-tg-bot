@@ -9,8 +9,6 @@ LOG = Path(__file__).with_suffix(".log") if not CLOUD else DIR / "bot.log"
 OR_MODELS = ["google/gemma-4-26b-a4b-it:free", "meta-llama/llama-3.2-3b-instruct:free"]
 STICKERS = ["CAACAgIAAxkBAAEM", "CAACAgIAAxkBAAEN"]
 
-jarvis_sysinfo = None
-jarvis_actions = None
 if not CLOUD:
     sys.path.insert(0, str(DIR))
     try:
@@ -18,6 +16,32 @@ if not CLOUD:
         import jarvis_actions
     except ImportError:
         pass
+else:
+    # Заглушки для облака — методы не нужны, но код не падает
+    class _MockActions:
+        @staticmethod
+        def has_action_intent(t): return False
+        @staticmethod
+        def execute_intent(*a, **kw): return {"status": "unrecognized"}
+        @staticmethod
+        def handle_confirmation(*a, **kw): return (None, None)
+        @staticmethod
+        def cleanup_pending(): pass
+        @staticmethod
+        def find_app_ps(n): return ""
+        @staticmethod
+        def classify_action(c): return 0
+        @staticmethod
+        def run_ps(c): return ""
+        @staticmethod
+        def launch_url(u): return ""
+        @staticmethod
+        def search_web(q): return ""
+        DANGEROUS = 2
+        SUSPICIOUS = 1
+        pending_confirmations = {}
+    jarvis_actions = _MockActions()
+    jarvis_sysinfo = None
 
 def log(msg):
     t = time.strftime("%H:%M:%S")
@@ -262,7 +286,7 @@ def handle_message(token, msg, opener):
                 "дот", "dota", "часов", "процессор", "cpu", "проц", "оператив", "ram", "озу",
                 "памят", "комп", "пк", "систем", "аптайм", "работает", "включ"]
     sysinfo_data = None
-    if is_creator and any(w in tlow for w in SYS_CMDS):
+    if is_creator and any(w in tlow for w in SYS_CMDS) and jarvis_sysinfo:
         try:
             sysinfo_data = jarvis_sysinfo.format_sys_info(tlow)
         except Exception as e:
