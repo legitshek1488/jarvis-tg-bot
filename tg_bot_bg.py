@@ -306,9 +306,9 @@ def handle_message(token, msg, opener):
                 opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=wait_msg, timeout=10)
             except: pass
             waited = 0
-            while waited < 30:
-                time.sleep(2)
-                waited += 2
+            while waited < 90:
+                time.sleep(3)
+                waited += 3
                 with _task_lock:
                     if _pending_task["result"] is not None:
                         sysinfo_data = _pending_task["result"]
@@ -336,7 +336,9 @@ def handle_message(token, msg, opener):
             text_with_info = "[%s] Вопрос пользователя: %s" % (" | ".join(context_parts), text)
         else:
             text_with_info = text
-        cloud_note = "Ты запущен на облачном сервере (Render) и не имеешь доступа к ПК создателя. Если спрашивают про ПК, видюху, окна, доту — объясни что он сейчас не подключён." if CLOUD else ""
+        cloud_note = ""
+        if CLOUD and not sysinfo_data:
+            cloud_note = "Ты запущен на облачном сервере (Render) и не имеешь доступа к ПК создателя. ПК создателя сейчас не в сети или не отвечает. Объясни это вежливо."
         if is_creator:
             prompt = ("Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. "
                       "Обращайся 'сэр'. Терпишь оскорбления от создателя. Если оскорбляет другой — пошли нахер. " + cloud_note).strip()
@@ -371,6 +373,7 @@ def http_agent():
                     with _task_lock:
                         if _pending_task["query"] and _pending_task["result"] is None:
                             task = {"query": _pending_task["query"]}
+                            log("Agent task served: %s" % _pending_task["query"][:40])
                         else:
                             task = {}
                     self.send_response(200)
@@ -389,6 +392,7 @@ def http_agent():
                         with _task_lock:
                             if data.get("query") == _pending_task["query"]:
                                 _pending_task["result"] = data.get("result", "")
+                                log("Agent result received: %s" % data.get("result","")[:40])
                     except: pass
                     self.send_response(200)
                     self.end_headers()
