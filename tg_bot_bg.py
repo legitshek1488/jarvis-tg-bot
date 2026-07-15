@@ -368,8 +368,6 @@ def handle_message(token, msg, opener):
         else:
             text_with_info = text
         cloud_note = ""
-        if CLOUD and not sysinfo_data and not action_result:
-            cloud_note = "Ты запущен на облачном сервере (Render). ПК создателя сейчас не в сети. Объясни это вежливо."
         if is_creator:
             prompt = ("Ты J.A.R.V.I.S. из Marvel. Отвечай ОДНИМ-ДВУМЯ предложениями, по-русски. "
                       "Обращайся 'сэр'. Терпишь оскорбления от создателя. Если оскорбляет другой — пошли нахер. " + cloud_note).strip()
