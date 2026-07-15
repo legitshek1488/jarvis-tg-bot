@@ -213,39 +213,48 @@ def handle_message(token, msg, opener):
             try:
                 opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=wait_msg, timeout=10)
             except: pass
-            waited = 0
-            while waited < 20:
-                time.sleep(2)
-                waited += 2
-                with _task_lock:
-                    r = _pending_task.get("result")
+            # Фоновый поток ждёт результат — не блокируем main
+            def agent_waiter(cid, mid, token, tlow):
+                waited = 0
+                my_opener = get_opener()
+                while waited < 20:
+                    time.sleep(2)
+                    waited += 2
+                    with _task_lock:
+                        r = _pending_task.get("result")
                     if r is not None:
-                        agent_replied = True
                         with _task_lock:
                             _pending_task["query"] = ""
                             _pending_task["result"] = None
                         if r.get("status") == "executed":
                             reply = "J.A.R.V.I.S. выполнил: %s" % r.get("result", "")
-                            data2 = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
-                            try:
-                                opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
+                            d = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
+                            try: my_opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=d, timeout=10)
                             except: pass
                             log("  -> agent executed: %s" % r.get("result","")[:40])
-                            return
                         elif r.get("status") == "denied":
                             reply = "J.A.R.V.I.S.: %s" % r.get("result", "Невозможно выполнить")
-                            data2 = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
-                            opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=data2, timeout=10)
+                            d = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
+                            try: my_opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=d, timeout=10)
+                            except: pass
                             log("  -> agent denied")
-                            return
                         elif r.get("status") == "sysinfo":
-                            sysinfo_data = r.get("result", "")
-                            log("  -> agent sysinfo: %s" % sysinfo_data[:40])
+                            reply = r.get("result", "")
+                            d = urllib.parse.urlencode({"chat_id": cid, "text": reply, "reply_to_message_id": mid}).encode()
+                            try: my_opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=d, timeout=10)
+                            except: pass
+                            log("  -> agent sysinfo sent")
                         break
-            if not agent_replied:
-                with _task_lock:
-                    _pending_task["query"] = ""
-                    _pending_task["result"] = None
+                else:
+                    with _task_lock:
+                        _pending_task["query"] = ""
+                        _pending_task["result"] = None
+                    try:
+                        timeout_msg = urllib.parse.urlencode({"chat_id": cid, "text": "ПК не отвечает, сэр.", "reply_to_message_id": mid}).encode()
+                        my_opener.open("https://api.telegram.org/bot%s/sendMessage" % token, data=timeout_msg, timeout=10)
+                    except: pass
+            threading.Thread(target=agent_waiter, args=(cid, mid, token, tlow), daemon=True).start()
+            return  # Не ждём, main свободен
     
     # Локальный режим: действия и sysinfo
     if not CLOUD:
